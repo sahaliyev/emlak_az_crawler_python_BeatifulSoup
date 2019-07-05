@@ -1,0 +1,80 @@
+import csv
+
+import requests
+from bs4 import BeautifulSoup
+
+
+class EmlakazCrawler:
+    def __init__(self):
+        self.base_url = 'https://emlak.az'
+        self.csv_file = "yeni_tikili.csv"  # her yeni categoriya ucun yeni csv duzelde bilersen adi deyishib
+        self.csv_columns = ['ID', 'info', 'title', 'təmiri', 'tel_nomre', 'sənədin_tipi', 'əmlakın_növü', 'unvan',
+                            'sahə', 'yerləşdiyi_mərtəbə', 'qiymet_usd', 'tarix', 'qiymet_azn', 'otaqların_sayı',
+                            'mərtəbə_sayı']
+
+    def outer_parser(self, url):
+        print('Parsing OUTER link: ', url)
+        response = requests.get(url)
+        response.encoding = "utf8"
+        html = response.text
+        bs = BeautifulSoup(html, 'lxml')
+
+        container = bs.find('div', class_='ticket-list')
+        elans_list = container.find_all('div', class_='ticket')
+
+        all_elans = []
+        elan = {}
+        for item in elans_list:
+            elan['link'] = self.base_url + item.a['href']
+            elan['title'] = item.h6.text.strip()
+            # elan['unvan1'] = item.find('div', class_='address').find('div', class_='align-right').text.strip()
+
+            elan = self.inner_parser(elan)
+            del elan['link'] # in my result I did not want to have link, so I deleted it
+            all_elans.append(elan.copy())
+
+        with open(self.csv_file, 'a', encoding='utf-8') as csvfile:
+            writer = csv.DictWriter(csvfile, delimiter=',', lineterminator='\n', fieldnames=self.csv_columns)
+            csvfile.seek(0, 2)
+
+            if csvfile.tell() == 0:
+                writer.writeheader()
+            for data in all_elans:
+                writer.writerow(data)
+
+    def inner_parser(self, elan):
+        url = elan.get('link')
+        print('Parsing inner link: ', url)
+        response = requests.get(url)
+        response.encoding = "utf8"
+        html = response.text
+        bs = BeautifulSoup(html, 'lxml')
+
+        container = bs.find('div', class_='content')
+
+        elan['ID'] = container.find('div', class_='panel').find('p', class_='pull-right').b.text.strip()
+        price_container = container.find('div', class_='price')
+        elan['qiymet_azn'] = price_container.find('span', class_='m').text.strip()
+        elan['qiymet_usd'] = price_container.find('span', class_='d').text.strip().replace('$', '').strip()
+        elan['tarix'] = container.find('span', class_='date').strong.text.strip()
+        elan['info'] = container.find('div', class_='desc').p.text.strip()
+
+        tex_details_container = container.find('dl', class_='technical-characteristics')
+
+        for dd in tex_details_container.find_all('dd'):
+            text = dd.span.text.strip().replace(' ', '_').lower()
+            elan[text] = dd.span.next_sibling
+
+        elan['unvan'] = container.find('div', class_='map-address').h4.text.strip()
+        elan['tel_nomre'] = container.find('p', class_='phone').text.strip()
+
+        return elan
+
+
+#Running code
+# use this when there is pagination, consider finding common url starting that can be full url with iteration
+for iter_ in range(1, 110):  # yeni_tikili has 109 pagination
+    EmlakazCrawler().outer_parser('https://emlak.az/elanlar/?ann_type=1&tip[]=1&sort_type=0&page=' + str(iter_))
+
+# use this when there is not pagination
+# EmlakazCrawler().outer_parser('url')
